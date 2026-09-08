@@ -44,3 +44,22 @@ Tested and fully verified across the entire Intel-macOS era / Проверено
 ## 🏆 Credits / Авторство
 Developed by **iDenis** (2026). 
 Special thanks to the ALSA au88x0 open-source developers for the original reverse-engineering foundations.
+
+## 🛠 Installation for Modern macOS (10.14 – 26.5 Tahoe) / Установка на современные системы
+
+For macOS Mojave (10.14) and newer, do NOT use the `.pkg` installer. Instead, inject the kext via your bootloader (OpenCore is highly recommended) / Для macOS Mojave (10.14) и новее НЕ используйте `.pkg` инсталлятор. Внедряйте кекст через ваш загрузчик (настоятельно рекомендуется OpenCore):
+
+### 🍏 OpenCore Method:
+1. Download **`AuVortex2Driver-kext-only.zip`** from the Releases page and extract it.
+2. Copy `AuVortex2Driver.kext` to your EFI folder: `/EFI/OC/Kexts/`.
+3. Open your `config.plist` using proper editor (like OpenCore Configurator or ProperTree).
+4. Add the kext to the **Kernel -> Add** section.
+5. Save `config.plist` and reboot your Mac.
+
+### 🍏 Метод для OpenCore:
+1. Скачайте **`AuVortex2Driver-kext-only.zip`** со страницы релизов и распакуйте его.
+2. Скопируйте `AuVortex2Driver.kext` в папку вашего EFI: `/EFI/OC/Kexts/`.
+3. Откройте ваш `config.plist` через редактор (например, OpenCore Configurator или ProperTree).
+4. Добавьте кекст в секцию **Kernel -> Add**.
+5. Сохраните `config.plist` и перезагрузите компьютер.
+
