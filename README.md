@@ -1,6 +1,6 @@
 # Aureal-Vortex2-Au8830-OSX
-The world's first native 64-bit IOKit driver and installer for Aureal Vortex 2 (AU8830) on Mac OS X 10.6.8
-# Aureal Vortex 2 (AU8830) Native 64-bit Driver for macOS 10.6.8 (Snow Leopard)
+This is the world's first fully functional, native 64-bit IOKit driver (kext) and installer for the legendary **Aureal Vortex 2 (AU8830)** sound card, supporting the entire Intel-macOS era from Snow Leopard to Tahoe.
+# Aureal Vortex 2 (AU8830) Universal 64-bit Driver for Intel macOS (10.6.8 – 26.5 Tahoe)
 
 This is the world's first fully functional, native 64-bit IOKit driver (kext) for the legendary **Aureal Vortex 2 (AU8830)** sound card, built from scratch for Mac OS X Snow Leopard.
 
@@ -23,9 +23,9 @@ Tested and fully verified across the entire Intel-macOS era / Проверено
 
 ---
 
-# Драйвер Aureal Vortex 2 (AU8830) x64 для Mac OS X 10.6.8 (Snow Leopard)
+# Универсальный драйвер Aureal Vortex 2 (AU8830) x64 для Intel macOS (от 10.6.8 до 26.5 Tahoe)
 
-Это первый в мире полностью функциональный нативный 64-битный драйвер (kext) архитектуры IOKit для легендарной звуковой карты **Aureal Vortex 2 (AU8830)**, созданный с нуля для Mac OS X Snow Leopard.
+Это первый в мире полностью функциональный нативный 64-битный драйвер (kext) и инсталлятор архитектуры IOKit для легендарной звуковой карты **Aureal Vortex 2 (AU8830)**, поддерживающий всю Intel-эру систем macOS — от Snow Leopard до новейшей Tahoe.
 
 Почти 30 лет этот революционный чип DSP считался «мертвым» для современных систем Apple из-за ликвидации компании Aureal и закрытой документации. Данный проект переносит низкоуровневую логику коммутации из Linux ALSA и чисто интегрирует её в объектную модель `IOAudioFamily` ядра Apple.
 
