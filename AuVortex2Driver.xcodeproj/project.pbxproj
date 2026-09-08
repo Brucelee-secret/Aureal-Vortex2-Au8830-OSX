@@ -1,0 +1,256 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AU8301 /* AuVortex2Driver.cpp in Sources */ = {isa = PBXBuildFile; fileRef = AU8302 /* AuVortex2Driver.cpp */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AU8300 /* AuVortex2Driver.kext */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = AuVortex2Driver.kext; sourceTree = BUILT_PRODUCTS_DIR; };
+		AU8302 /* AuVortex2Driver.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; path = AuVortex2Driver.cpp; sourceTree = "<group>"; };
+		AU8303 /* AuVortex2Driver.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = AuVortex2Driver.h; sourceTree = "<group>"; };
+		AU8304 /* au8830.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = au8830.h; sourceTree = "<group>"; };
+		AU8305 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AU8306 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AU8307 = {
+			isa = PBXGroup;
+			children = (
+				AU8308 /* AuVortex2Driver */,
+				AU8309 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AU8308 /* AuVortex2Driver */ = {
+			isa = PBXGroup;
+			children = (
+				AU8302 /* AuVortex2Driver.cpp */,
+				AU8303 /* AuVortex2Driver.h */,
+				AU8304 /* au8830.h */,
+				AU8305 /* Info.plist */,
+			);
+			name = AuVortex2Driver;
+			sourceTree = "<group>";
+		};
+		AU8309 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				AU8300 /* AuVortex2Driver.kext */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		AU8310 /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
+
+/* Begin PBXNativeTarget section */
+		AU8311 /* AuVortex2Driver */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AU8312 /* Build configuration list for PBXNativeTarget "AuVortex2Driver" */;
+			buildPhases = (
+				AU8310 /* Headers */,
+				AU8313 /* Resources */,
+				AU8314 /* Sources */,
+				AU8306 /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AuVortex2Driver;
+			productName = AuVortex2Driver;
+			productReference = AU8300 /* AuVortex2Driver.kext */;
+			productType = "com.apple.product-type.kernel-extension";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AU8315 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0420;
+				ORGANIZATIONNAME = "";
+			};
+			buildConfigurationList = AU8316 /* Build configuration list for PBXProject "AuVortex2Driver" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				English,
+			);
+			mainGroup = AU8307;
+			productRefGroup = AU8309 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AU8311 /* AuVortex2Driver */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AU8313 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AU8314 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				AU8301 /* AuVortex2Driver.cpp in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AU8317 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				COPY_PHASE_STRIP = NO;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"KERNEL=1",
+					"KERNEL_PRIVATE=1",
+					"APPLE=1",
+					"NeXT=1",
+				);
+				OTHER_CFLAGS = "";
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				INFOPLIST_FILE = Info.plist;
+				INSTALL_PATH = "$(SYSTEM_LIBRARY_DIR)/Extensions";
+				LD_CPLUSPLUS = YES;
+				LD_DYLIB_INSTALL_NAME = "@rpath/$(PRODUCT_NAME).kext/Contents/MacOS/$(PRODUCT_NAME)";
+				LD_NO_PIE = YES;
+				OTHER_LDFLAGS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				ONLY_ACTIVE_ARCH = YES;
+				SDKROOT = macosx10.6;
+				VALID_ARCHS = "i386 x86_64";
+			};
+			name = Debug;
+		};
+		AU8318 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				COPY_PHASE_STRIP = YES;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				GCC_ENABLE_OBJC_EXCEPTIONS = YES;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"KERNEL=1",
+					"KERNEL_PRIVATE=1",
+					"APPLE=1",
+					"NeXT=1",
+				);
+				OTHER_CFLAGS = "";
+				GCC_SYMBOLS_PRIVATE_EXTERN = NO;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				INFOPLIST_FILE = Info.plist;
+				INSTALL_PATH = "$(SYSTEM_LIBRARY_DIR)/Extensions";
+				LD_CPLUSPLUS = YES;
+				LD_DYLIB_INSTALL_NAME = "@rpath/$(PRODUCT_NAME).kext/Contents/MacOS/$(PRODUCT_NAME)";
+				LD_NO_PIE = YES;
+				OTHER_LDFLAGS = "";
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				SDKROOT = macosx10.6;
+				VALID_ARCHS = "i386 x86_64";
+			};
+			name = Release;
+		};
+		AU8319 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_C_LANGUAGE_STANDARD = c99;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit/pci",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit/audio",
+				);
+				PRODUCT_NAME = AuVortex2Driver;
+			};
+			name = Debug;
+		};
+		AU8320 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				GCC_C_LANGUAGE_STANDARD = c99;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(SDKROOT)/System/Library/Frameworks/Kernel.framework/Headers",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit/pci",
+					"$(SDKROOT)/System/Library/Frameworks/IOKit.framework/Headers/IOKit/audio",
+				);
+				PRODUCT_NAME = AuVortex2Driver;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AU8312 /* Build configuration list for PBXNativeTarget "AuVortex2Driver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AU8317 /* Debug */,
+				AU8318 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		AU8316 /* Build configuration list for PBXProject "AuVortex2Driver" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AU8319 /* Debug */,
+				AU8320 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AU8315 /* Project object */;
+}

@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>English</string>
+	<key>CFBundleExecutable</key>
+	<string>AuVortex2Driver</string>
+	<key>CFBundleIdentifier</key>
+	<string>com.aureal.driver.AuVortex2</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>Aureal Vortex 2 Driver</string>
+	<key>CFBundlePackageType</key>
+	<string>KEXT</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0.3</string>
+	<key>CFBundleSignature</key>
+	<string>????</string>
+	<key>CFBundleVersion</key>
+	<string>1.0.3</string>
+	<key>DTCompiler</key>
+	<string>com.apple.compilers.llvmgcc42</string>
+	<key>DTPlatformBuild</key>
+	<string>4A1002</string>
+	<key>DTPlatformVersion</key>
+	<string>GM</string>
+	<key>DTSDKBuild</key>
+	<string>10J567</string>
+	<key>DTSDKName</key>
+	<string>macosx10.6</string>
+	<key>DTXcode</key>
+	<string>0420</string>
+	<key>DTXcodeBuild</key>
+	<string>4A1002</string>
+	<key>IOKitPersonalities</key>
+	<dict>
+		<key>AuVortex2Driver</key>
+		<dict>
+			<key>CFBundleIdentifier</key>
+			<string>com.aureal.driver.AuVortex2</string>
+			<key>IOClass</key>
+			<string>AuVortex2Driver</string>
+			<key>IOMatchCategory</key>
+			<string>IOAudioDevice</string>
+			<key>IOProviderClass</key>
+			<string>IOPCIDevice</string>
+			<key>IONameMatch</key>
+			<array>
+				<string>pci12eb,1</string>
+				<string>pci12eb,2</string>
+			</array>
+			<key>IONameMatched</key>
+			<string>Aureal Vortex 2</string>
+			<key>IOProbeScore</key>
+			<integer>10000</integer>
+			<key>IOKitDebug</key>
+			<integer>65535</integer>
+		</dict>
+	</dict>
+	<key>OSBundleLibraries</key>
+	<dict>
+	    <key>com.apple.iokit.IOPCIFamily</key>
+	    <string>1.0</string>
+	    <key>com.apple.iokit.IOAudioFamily</key>
+	    <string>1.1d25</string>
+	    <key>com.apple.kpi.libkern</key>
+	    <string>9.0.0d1</string>
+	    <key>com.apple.kpi.iokit</key>
+	    <string>9.0.0d1</string>
+	    <key>com.apple.kpi.bsd</key>
+	    <string>9.0</string>
+	    <key>com.apple.kpi.mach</key>
+	    <string>9.0.0d1</string>
+	</dict>
+</dict>
+</plist>
