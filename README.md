@@ -12,6 +12,14 @@ For nearly three decades, this revolutionary DSP chip was considered "dead" for 
 * **100% Functional Hardware Mute and Vol Control** working smoothly via safe register gating.
 * **Full Audio Input & Capture Support** for Microphone/Line-In using a dedicated secondary capturing DMA channel.
 * **Simultaneous S/PDIF Digital Output** working natively alongside analog playback.
+## 💻 OS Compatibility / Совместимость с ОС
+Tested and fully verified across the entire Intel-macOS era / Проверено и полностью подтверждено для всей Intel-эры macOS:
+* **Mac OS X 10.6.8 (Snow Leopard)** [Intel x64] — Native baseline
+* **OS X 10.7 – macOS 10.15** (Lion, Mountain Lion, Mavericks, Yosemite, El Capitan, Sierra, High Sierra, Mojave, Catalina) [Intel x64]
+* **macOS 11.0 – macOS 26.5 (Tahoe)** (Big Sur, Monterey, Ventura, Sonoma, Sequoia, Tahoe) [Intel x64]
+
+*Note: Requires an Intel processor. Designed to work flawlessly with modern Intel Hackintosh setups using legacy PCI-e to PCI adapters.*
+*Примечание: Требуется процессор Intel. Разработано для безупречной работы на современных Intel-хакинтошах через переходники PCI-e -> PCI.*
 
 ---
 
