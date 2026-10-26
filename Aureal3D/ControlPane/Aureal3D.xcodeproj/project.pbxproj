@@ -1,0 +1,230 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		A10000000000000000000001 /* Aureal3DPreferencePane.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* Aureal3DPreferencePane.m */; };
+		A10000000000000000000002 /* ../UserSupport/Aureal3DControlAccess.m in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* ../UserSupport/Aureal3DControlAccess.m */; };
+		A10000000000000000000003 /* PreferencePanes.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* PreferencePanes.framework */; };
+		A10000000000000000000004 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* Cocoa.framework */; };
+		A10000000000000000000005 /* IOKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* IOKit.framework */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		A20000000000000000000001 /* Aureal3DPreferencePane.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = Aureal3DPreferencePane.m; sourceTree = "<group>"; };
+		A20000000000000000000002 /* Aureal3DPreferencePane.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = Aureal3DPreferencePane.h; sourceTree = "<group>"; };
+		A20000000000000000000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		A20000000000000000000004 /* ../UserSupport/Aureal3DControlAccess.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ../UserSupport/Aureal3DControlAccess.m; sourceTree = "<group>"; };
+		A20000000000000000000005 /* ../UserSupport/Aureal3DControlAccess.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ../UserSupport/Aureal3DControlAccess.h; sourceTree = "<group>"; };
+		A20000000000000000000006 /* PreferencePanes.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = PreferencePanes.framework; path = System/Library/Frameworks/PreferencePanes.framework; sourceTree = SDKROOT; };
+		A20000000000000000000007 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = System/Library/Frameworks/Cocoa.framework; sourceTree = SDKROOT; };
+		A20000000000000000000008 /* IOKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = IOKit.framework; path = System/Library/Frameworks/IOKit.framework; sourceTree = SDKROOT; };
+		A30000000000000000000001 /* Aureal3D.prefPane */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = Aureal3D.prefPane; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		A40000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000003 /* PreferencePanes.framework in Frameworks */,
+				A10000000000000000000004 /* Cocoa.framework in Frameworks */,
+				A10000000000000000000005 /* IOKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		A50000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				A50000000000000000000002,
+				A50000000000000000000003 /* Frameworks */,
+				A50000000000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		A50000000000000000000002 = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000001 /* Aureal3DPreferencePane.m */,
+				A20000000000000000000002 /* Aureal3DPreferencePane.h */,
+				A20000000000000000000003 /* Info.plist */,
+				A20000000000000000000004 /* ../UserSupport/Aureal3DControlAccess.m */,
+				A20000000000000000000005 /* ../UserSupport/Aureal3DControlAccess.h */,
+			);
+			sourceTree = "<group>";
+		};
+		A50000000000000000000003 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A20000000000000000000006 /* PreferencePanes.framework */,
+				A20000000000000000000007 /* Cocoa.framework */,
+				A20000000000000000000008 /* IOKit.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		A50000000000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				A30000000000000000000001 /* Aureal3D.prefPane */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		A60000000000000000000001 /* Aureal3D */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A70000000000000000000002 /* Build configuration list for PBXNativeTarget "Aureal3D" */;
+			buildPhases = (
+				A80000000000000000000001 /* Sources */,
+				A40000000000000000000001 /* Frameworks */,
+				A90000000000000000000001 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Aureal3D;
+			productName = Aureal3D;
+			productReference = A30000000000000000000001 /* Aureal3D.prefPane */;
+			productType = "com.apple.product-type.bundle";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000000000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastUpgradeCheck = 0420;
+			};
+			buildConfigurationList = A70000000000000000000001 /* Build configuration list for PBXProject "Aureal3D" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = English;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = A50000000000000000000001;
+			productRefGroup = A50000000000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				A60000000000000000000001 /* Aureal3D */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		A90000000000000000000001 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		A80000000000000000000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A10000000000000000000001 /* Aureal3DPreferencePane.m in Sources */,
+				A10000000000000000000002 /* ../UserSupport/Aureal3DControlAccess.m in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AF0000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = x86_64;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				SDKROOT = macosx10.6;
+			};
+			name = Debug;
+		};
+		AF0000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = x86_64;
+				GCC_C_LANGUAGE_STANDARD = gnu99;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				SDKROOT = macosx10.6;
+			};
+			name = Release;
+		};
+		AF0000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				CLANG_ENABLE_OBJC_ARC = NO;
+				GCC_OBJC_GC = unsupported;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				INFOPLIST_FILE = Info.plist;
+				MACH_O_TYPE = mh_bundle;
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_NAME = Aureal3D;
+				SDKROOT = macosx10.6;
+				VALID_ARCHS = "i386 x86_64";
+				WRAPPER_EXTENSION = prefPane;
+			};
+			name = Debug;
+		};
+		AF0000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ARCHS = "$(ARCHS_STANDARD_32_64_BIT)";
+				CLANG_ENABLE_OBJC_ARC = NO;
+				GCC_OBJC_GC = unsupported;
+				GCC_VERSION = com.apple.compilers.llvmgcc42;
+				INFOPLIST_FILE = Info.plist;
+				MACH_O_TYPE = mh_bundle;
+				MACOSX_DEPLOYMENT_TARGET = 10.6;
+				ONLY_ACTIVE_ARCH = NO;
+				PRODUCT_NAME = Aureal3D;
+				SDKROOT = macosx10.6;
+				VALID_ARCHS = "i386 x86_64";
+				WRAPPER_EXTENSION = prefPane;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		A70000000000000000000001 /* Build configuration list for PBXProject "Aureal3D" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF0000000000000000000001 /* Debug */,
+				AF0000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A70000000000000000000002 /* Build configuration list for PBXNativeTarget "Aureal3D" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AF0000000000000000000003 /* Debug */,
+				AF0000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = AA0000000000000000000001 /* Project object */;
+}

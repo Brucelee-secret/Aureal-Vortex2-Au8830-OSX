@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+ "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>English</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>org.aureal.AuVortex2.ThreeD</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>CFBundleName</key>
+    <string>Aureal 3D</string>
+    <key>CFBundleDisplayName</key>
+    <string>Aureal 3D</string>
+    <key>CFBundlePackageType</key>
+    <string>BNDL</string>
+    <key>CFBundleSignature</key>
+    <string>Au3D</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.7</string>
+    <key>CFBundleVersion</key>
+    <string>1.0.7</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>10.6</string>
+    <key>NSPrincipalClass</key>
+    <string>Aureal3DPreferencePane</string>
+</dict>
+</plist>
