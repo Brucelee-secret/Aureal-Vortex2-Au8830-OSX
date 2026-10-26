@@ -17,6 +17,7 @@
 #include <IOKit/audio/IOAudioLevelControl.h>
 #include <IOKit/audio/IOAudioToggleControl.h>
 #include <IOKit/audio/IOAudioDefines.h>
+#include <IOKit/IOLocks.h>
 #include <IOKit/pci/IOPCIDevice.h>
 #include <IOKit/IOMemoryDescriptor.h>
 #include <IOKit/IOTimerEventSource.h>
@@ -61,6 +62,10 @@ class AuVortex2AudioEngine;
 #define kAuV2SpdifMixRight     7
 #define kAuV2SpdifChannel      0x14
 
+#define kAuV2PlaybackRouteNone   0
+#define kAuV2PlaybackRouteAnalog 1
+#define kAuV2PlaybackRouteSpdif  2
+
 #define kAuV2FifoStop          0
 #define kAuV2FifoStart         1
 #define kAuV2FifoPause         2
@@ -73,6 +78,7 @@ class AuVortex2AudioEngine;
 #define kAuV2VolumeMin         0
 #define kAuV2VolumeMax         65535
 #define kAuV2VolumeDefault     32768
+#define kAuV2ThreeDControlID   0x41553344U /* "AU3D" */
 
 class AuVortex2Driver : public IOAudioDevice
 {
@@ -85,7 +91,14 @@ private:
     volatile UInt8                 *fBaseAddress;
     IOTimerEventSource              *fTimerSource;
     AuVortex2AudioEngine           *fAudioEngine;
+    AuVortex2AudioEngine           *fSpdifEngine;
+    AuVortex2AudioEngine           *fActiveAudioEngine;
+    IOLock                          *fPlaybackLock;
+    bool                            fTimerRunning;
+    bool                            fPlaybackTransition;
     bool                            fDeviceInitialized;
+    bool                            fHardwareTouched;
+    bool                            fBusMasterEnabled;
 
     UInt16                          fVendorID;
     UInt16                          fDeviceID;
@@ -104,6 +117,8 @@ private:
     bool                            fMuted;
     SInt32                          fInputVolume;
     bool                            fInputMuted;
+    bool                            fThreeDControlAvailable;
+    bool                            fThreeDEnabled;
 
 public:
     virtual bool init(OSDictionary *properties);
@@ -126,6 +141,7 @@ public:
     void   stopCaptureDMA(void);
     void   applyAnalogVolume(void);
     void   applyAnalogInputGain(void);
+    void   setPlaybackRoute(int route);
 
     static IOReturn volumeChangeHandler(OSObject *target, IOAudioControl *control,
                                         SInt32 oldValue, SInt32 newValue);
@@ -135,9 +151,12 @@ public:
                                              SInt32 oldValue, SInt32 newValue);
     static IOReturn inputMuteChangeHandler(OSObject *target, IOAudioControl *control,
                                            SInt32 oldValue, SInt32 newValue);
+    static IOReturn threeDChangeHandler(OSObject *target, IOAudioControl *control,
+                                        SInt32 oldValue, SInt32 newValue);
 
 private:
     bool configurePCIDevice(void);
+    bool setBusMasterEnabled(bool enabled);
     bool mapHardwareRegisters(void);
     bool initializeVortexHardware(void);
     void shutdownHardware(void);
@@ -149,6 +168,7 @@ private:
     UInt16 codecRead(UInt8 addr);
     void codecInit(void);
     bool initAC97(void);
+    bool setThreeDEnabled(bool enabled);
 
     void mixerInit(void);
     void mixSetOutputVol(UInt8 mix, UInt8 vol);
@@ -204,21 +224,32 @@ private:
 class AuVortex2AudioEngine : public IOAudioEngine
 {
     OSDeclareDefaultStructors(AuVortex2AudioEngine)
+    friend class AuVortex2Driver;
 
 private:
     AuVortex2Driver            *fDevice;
+    bool                        fDigitalOutput;
+    bool                        fEngineRunning;
+    SInt32                      fDigitalVolume;
+    bool                        fDigitalMuted;
     IOBufferMemoryDescriptor   *fOutputBuffer;
+    bool                        fOutputPrepared;
     void                       *fOutputBufferPtr;
     IOPhysicalAddress           fOutputPhys[kAuV2NumPeriods];
     IOAudioStream              *fOutputStream;
     IOBufferMemoryDescriptor   *fInputBuffer;
+    bool                        fInputPrepared;
     void                       *fInputBufferPtr;
     IOPhysicalAddress           fInputPhys[kAuV2NumPeriods];
     IOAudioStream              *fInputStream;
     UInt32                      fLastSampleFrame;
+    UInt64                      fLastPollUptime;
+    UInt32                      fInputDiagnosticFrames;
+    UInt32                      fInputDiagnosticPeak;
+    UInt64                      fCaptureDiagnosticLastUptime;
 
 public:
-    virtual bool init(AuVortex2Driver *device);
+    bool initForDevice(AuVortex2Driver *device, bool digitalOutput);
     virtual void free(void);
 
     virtual bool initHardware(IOService *provider);
@@ -249,6 +280,14 @@ private:
     bool createOutputStream(void);
     bool createInputStream(void);
     bool createAudioControls(void);
+    static IOReturn digitalVolumeChangeHandler(OSObject *target,
+                                                IOAudioControl *control,
+                                                SInt32 oldValue,
+                                                SInt32 newValue);
+    static IOReturn digitalMuteChangeHandler(OSObject *target,
+                                              IOAudioControl *control,
+                                              SInt32 oldValue,
+                                              SInt32 newValue);
 };
 
 #endif /* _AuVortex2Driver_h */

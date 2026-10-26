@@ -11,6 +11,7 @@
 #include <IOKit/IOWorkLoop.h>
 #include <IOKit/IOTimerEventSource.h>
 #include <libkern/OSByteOrder.h>
+#include <kern/clock.h>
 
 #define super IOAudioDevice
 OSDefineMetaClassAndStructors(AuVortex2Driver, IOAudioDevice)
@@ -55,6 +56,83 @@ OSDefineMetaClassAndStructors(AuVortex2AudioEngine, IOAudioEngine)
 
 #define LOG(fmt, args...) IOLog("AuVortex2: " fmt "\n", ##args)
 
+/*
+ * The AU8830 buffer-base registers are 32-bit DMA addresses. Reject buffers
+ * that the device cannot address instead of truncating an IOPhysicalAddress.
+ */
+static bool collectDmaPages(IOBufferMemoryDescriptor *buffer,
+                            const char *name,
+                            IOPhysicalAddress pages[kAuV2NumPeriods])
+{
+    IOByteCount contiguousLength = 0;
+    IOPhysicalAddress base;
+    UInt64 base64;
+    UInt32 i;
+
+    if (!buffer)
+        return false;
+
+    base = buffer->getPhysicalSegment(0, &contiguousLength);
+    if (base == 0 || contiguousLength < kAuV2BufferBytes) {
+        LOG("%s DMA buffer is not fully contiguous (%lu of %u)",
+            name, (unsigned long)contiguousLength, kAuV2BufferBytes);
+        return false;
+    }
+    base64 = (UInt64)base;
+    if (base64 > 0xffffffffULL ||
+        ((UInt64)kAuV2BufferBytes - 1) > (0xffffffffULL - base64)) {
+        LOG("%s DMA buffer is outside the AU8830 32-bit DMA range", name);
+        return false;
+    }
+
+    for (i = 0; i < kAuV2NumPeriods; i++) {
+        IOByteCount segmentLength = 0;
+        IOPhysicalAddress address =
+            buffer->getPhysicalSegment(i * kAuV2PeriodBytes, &segmentLength);
+        UInt64 address64 = (UInt64)address;
+
+        if (address == 0 || segmentLength < kAuV2PeriodBytes) {
+            LOG("%s DMA page %u invalid (phys=0x%llx len=%lu)",
+                name, i, (unsigned long long)address64,
+                (unsigned long)segmentLength);
+            return false;
+        }
+        if (address64 > 0xffffffffULL ||
+            ((UInt64)kAuV2PeriodBytes - 1) > (0xffffffffULL - address64)) {
+            LOG("%s DMA page %u is outside the AU8830 32-bit DMA range",
+                name, i);
+            return false;
+        }
+        if (address64 != base64 + ((UInt64)i * kAuV2PeriodBytes)) {
+            LOG("%s DMA page %u is not at the expected contiguous offset",
+                name, i);
+            return false;
+        }
+        if ((address64 & (kAuV2FrameBytes - 1)) != 0) {
+            LOG("%s DMA page %u is not frame-aligned (phys=0x%llx)",
+                name, i, (unsigned long long)address64);
+            return false;
+        }
+        pages[i] = address;
+        LOG("%s DMA page %u phys=0x%08x len=%lu",
+            name, i, (unsigned)address, (unsigned long)segmentLength);
+    }
+
+    return true;
+}
+
+static void absoluteTimeFromTicks(UInt64 ticks, AbsoluteTime *time)
+{
+    if (!time)
+        return;
+#if __LP64__
+    *time = ticks;
+#else
+    time->lo = (UInt32)ticks;
+    time->hi = (SInt32)(ticks >> 32);
+#endif
+}
+
 /* ---------------- register access ---------------- */
 
 UInt32 AuVortex2Driver::readRegister(UInt32 offset)
@@ -80,7 +158,14 @@ bool AuVortex2Driver::init(OSDictionary *properties)
     fBaseAddress = NULL;
     fTimerSource = NULL;
     fAudioEngine = NULL;
+    fSpdifEngine = NULL;
+    fActiveAudioEngine = NULL;
+    fPlaybackLock = IOLockAlloc();
+    fTimerRunning = false;
+    fPlaybackTransition = false;
     fDeviceInitialized = false;
+    fHardwareTouched = false;
+    fBusMasterEnabled = false;
     fVendorID = 0;
     fDeviceID = 0;
     fDmaCtrl = 0;
@@ -96,19 +181,40 @@ bool AuVortex2Driver::init(OSDictionary *properties)
     fMuted = false;
     fInputVolume = kAuV2VolumeDefault;
     fInputMuted = false;
+    fThreeDControlAvailable = false;
+    fThreeDEnabled = false;
     bzero(fMixChannels, sizeof(fMixChannels));
-    return true;
+    return fPlaybackLock != NULL;
 }
 
 void AuVortex2Driver::free(void)
 {
+    AuVortex2AudioEngine *activeEngine = NULL;
+    if (fPlaybackLock) {
+        IOLockLock(fPlaybackLock);
+        activeEngine = fActiveAudioEngine;
+        if (activeEngine)
+            activeEngine->retain();
+        IOLockUnlock(fPlaybackLock);
+    }
+    if (activeEngine) {
+        activeEngine->stopAudioEngine();
+        activeEngine->release();
+    }
+
     if (fTimerSource) {
+        stopStampTimer();
         fTimerSource->disable();
         if (getWorkLoop())
             getWorkLoop()->removeEventSource(fTimerSource);
         fTimerSource->release();
         fTimerSource = NULL;
     }
+
+    if (fHardwareTouched)
+        shutdownHardware();
+    else if (fBusMasterEnabled && !setBusMasterEnabled(false))
+        LOG("warning: unable to disable PCI bus mastering during free");
 
     if (fMMIO) {
         fMMIO->release();
@@ -123,6 +229,12 @@ void AuVortex2Driver::free(void)
     }
 
     fAudioEngine = NULL;
+    fSpdifEngine = NULL;
+    fActiveAudioEngine = NULL;
+    if (fPlaybackLock) {
+        IOLockFree(fPlaybackLock);
+        fPlaybackLock = NULL;
+    }
     super::free();
 }
 
@@ -168,6 +280,7 @@ bool AuVortex2Driver::initHardware(IOService *provider)
     if (!configurePCIDevice() || !mapHardwareRegisters())
         return false;
 
+    fHardwareTouched = true;
     if (!initializeVortexHardware())
         return false;
 
@@ -179,7 +292,7 @@ bool AuVortex2Driver::initHardware(IOService *provider)
         LOG("engine alloc failed");
         return false;
     }
-    if (!fAudioEngine->init(this)) {
+    if (!fAudioEngine->initForDevice(this, false)) {
         LOG("engine init failed");
         fAudioEngine->release();
         fAudioEngine = NULL;
@@ -195,6 +308,29 @@ bool AuVortex2Driver::initHardware(IOService *provider)
     }
 
     fAudioEngine->release();
+
+    /*
+     * Register a separate CoreAudio endpoint for PCM over S/PDIF. Both output
+     * engines intentionally arbitrate the one AU8830 playback DMA channel, so
+     * only the selected endpoint can own the hardware at a time.
+     */
+    fSpdifEngine = new AuVortex2AudioEngine;
+    if (fSpdifEngine && fSpdifEngine->initForDevice(this, true)) {
+        if (activateAudioEngine(fSpdifEngine) == kIOReturnSuccess) {
+            fSpdifEngine->release();
+            LOG("separate S/PDIF PCM engine registered: 48000 Hz stereo");
+        } else {
+            LOG("separate S/PDIF engine activation failed; analog remains available");
+            fSpdifEngine->release();
+            fSpdifEngine = NULL;
+        }
+    } else {
+        if (fSpdifEngine)
+            fSpdifEngine->release();
+        fSpdifEngine = NULL;
+        LOG("separate S/PDIF engine initialization failed; analog remains available");
+    }
+
     fDeviceInitialized = true;
     registerService();
     LOG("hardware ready");
@@ -203,18 +339,61 @@ bool AuVortex2Driver::initHardware(IOService *provider)
 
 void AuVortex2Driver::stop(IOService *provider)
 {
-    if (fDeviceInitialized) {
-        shutdownHardware();
-        fDeviceInitialized = false;
+    AuVortex2AudioEngine *activeEngine = NULL;
+    stopStampTimer();
+    if (fPlaybackLock) {
+        IOLockLock(fPlaybackLock);
+        activeEngine = fActiveAudioEngine;
+        if (activeEngine)
+            activeEngine->retain();
+        IOLockUnlock(fPlaybackLock);
     }
+    if (activeEngine) {
+        IOReturn stopResult = activeEngine->stopAudioEngine();
+        if (stopResult != kIOReturnSuccess)
+            LOG("active output engine stop failed: 0x%x", stopResult);
+        activeEngine->release();
+    }
+    if (fHardwareTouched) {
+        shutdownHardware();
+    } else if (fBusMasterEnabled) {
+        if (!setBusMasterEnabled(false))
+            LOG("warning: unable to disable PCI bus mastering during stop");
+    }
+    fDeviceInitialized = false;
     super::stop(provider);
 }
 
 bool AuVortex2Driver::configurePCIDevice(void)
 {
+    /*
+     * Keep the device from issuing stale DMA while its DSP/FIFOs are reset
+     * and its new DMA rings are validated.
+     */
+    if (!setBusMasterEnabled(false))
+        return false;
     fPCIDevice->setMemoryEnable(true);
     fPCIDevice->setIOEnable(true);
-    fPCIDevice->setBusMasterEnable(true);
+    return true;
+}
+
+bool AuVortex2Driver::setBusMasterEnabled(bool enabled)
+{
+    UInt16 command;
+    bool actual;
+
+    if (!fPCIDevice)
+        return false;
+
+    fPCIDevice->setBusMasterEnable(enabled);
+    command = fPCIDevice->configRead16(kIOPCIConfigCommand);
+    actual = (command & 0x0004U) != 0;
+    fBusMasterEnabled = actual;
+    if (actual != enabled) {
+        LOG("PCI bus-master %s request did not stick (command=0x%04x)",
+            enabled ? "enable" : "disable", command);
+        return false;
+    }
     return true;
 }
 
@@ -574,7 +753,7 @@ void AuVortex2Driver::srcSetup(UInt8 src, UInt32 cr, int d, int dirplay)
     srcClearDrift(src);
     srcSetThrottle(src, dirplay);
 
-    if ((dirplay == 0)) {
+    if (dirplay == 0) {
         esp10 = tr ? 0xf : 0xc;
         ebp = 0;
     } else {
@@ -699,6 +878,22 @@ void AuVortex2Driver::connectSpdifPlayback(int en)
     connectionMixAdb(en, kAuV2SpdifChannel, kAuV2SpdifMixRight, ADB_SPDIFOUT(1));
 }
 
+void AuVortex2Driver::setPlaybackRoute(int route)
+{
+    bool analog = route == kAuV2PlaybackRouteAnalog;
+    bool spdif = route == kAuV2PlaybackRouteSpdif;
+
+    connectionMixinMix(analog, kAuV2MixinLeft, kAuV2MixLeft);
+    connectionMixinMix(analog, kAuV2MixinRight, kAuV2MixRight);
+    connectionMixinMix(analog, kAuV2MixinLeft, kAuV2MixRearLeft);
+    connectionMixinMix(analog, kAuV2MixinRight, kAuV2MixRearRight);
+    connectionMixinMix(spdif, kAuV2MixinLeft, kAuV2SpdifMixLeft);
+    connectionMixinMix(spdif, kAuV2MixinRight, kAuV2SpdifMixRight);
+
+    LOG("playback route selected: %s",
+        analog ? "analog" : (spdif ? "S/PDIF" : "none"));
+}
+
 void AuVortex2Driver::spdifInit(int rate)
 {
     int i;
@@ -812,12 +1007,12 @@ bool AuVortex2Driver::initAC97(void)
 
     codecWrite(0x5e, 0xabba); // Будим дополнительный ЦАП
 
-    // --- ВКЛЮЧАЕМ 3D SURROUND НА ГНЕЗДО 1 ---
-    // Регистр 0x20 (GP) включает микширование 3D-процессора на главные каналы (бит 0x2000 или 0x4000)
-    codecWrite(0x20, codecRead(0x20) | 0x6000); 
-    // Регистр 0x22 контролирует глубину эффекта. Выставим умеренно-максимальный 3D-объем (0x000f)
-    codecWrite(0x22, 0x000f); 
-    // ----------------------------------------
+    /*
+     * Keep the existing analog 3D setup as the default. The separate
+     * preference pane changes only these codec fields at runtime.
+     */
+    if (!setThreeDEnabled(true))
+        LOG("AC97 3D control unavailable; continuing with analog audio");
 
     codecWrite(AC97_SURROUND_MASTER, 0x0000);
 
@@ -834,6 +1029,66 @@ bool AuVortex2Driver::initAC97(void)
 
 
 
+bool AuVortex2Driver::setThreeDEnabled(bool enabled)
+{
+    const UInt16 threeDMask = 0x000f;
+    const UInt16 generalPurposeMask = 0x6000;
+    const UInt16 oldThreeD = codecRead(0x22);
+    const UInt16 oldGeneralPurpose = codecRead(0x20);
+    UInt16 expectedThreeD;
+    UInt16 expectedGeneralPurpose;
+
+    if (oldThreeD == 0xffff || oldGeneralPurpose == 0xffff) {
+        LOG("AC97 3D register read failed");
+        return false;
+    }
+
+    expectedThreeD = enabled ?
+        (UInt16)((oldThreeD & (UInt16)~threeDMask) | threeDMask) :
+        (UInt16)(oldThreeD & (UInt16)~threeDMask);
+    expectedGeneralPurpose = enabled ?
+        (UInt16)(oldGeneralPurpose | generalPurposeMask) :
+        (UInt16)(oldGeneralPurpose & (UInt16)~generalPurposeMask);
+
+    codecWrite(0x22, expectedThreeD);
+    codecWrite(0x20, expectedGeneralPurpose);
+
+    const UInt16 readbackThreeD = codecRead(0x22);
+    const UInt16 readbackGeneralPurpose = codecRead(0x20);
+    if (readbackThreeD == 0xffff || readbackGeneralPurpose == 0xffff ||
+        (readbackThreeD & threeDMask) != (expectedThreeD & threeDMask) ||
+        (readbackGeneralPurpose & generalPurposeMask) !=
+            (expectedGeneralPurpose & generalPurposeMask)) {
+        codecWrite(0x22, oldThreeD);
+        codecWrite(0x20, oldGeneralPurpose);
+        LOG("AC97 3D register verification failed; previous values restored");
+        return false;
+    }
+
+    fThreeDEnabled = enabled;
+    fThreeDControlAvailable = true;
+    LOG("AC97 3D Surround %s (3D=%04x GP=%04x)",
+        enabled ? "enabled" : "disabled",
+        readbackThreeD, readbackGeneralPurpose);
+    return true;
+}
+
+IOReturn AuVortex2Driver::threeDChangeHandler(OSObject *target,
+    IOAudioControl *control, SInt32 oldValue, SInt32 newValue)
+{
+    AuVortex2Driver *driver = OSDynamicCast(AuVortex2Driver, target);
+    (void)control;
+    (void)oldValue;
+    if (!driver || !driver->fThreeDControlAvailable)
+        return kIOReturnNotReady;
+    if (newValue != 0 && newValue != 1)
+        return kIOReturnBadArgument;
+    if (driver->fThreeDEnabled == (newValue != 0))
+        return kIOReturnSuccess;
+    return driver->setThreeDEnabled(newValue != 0) ?
+        kIOReturnSuccess : kIOReturnIOError;
+}
+
 void AuVortex2Driver::applyAnalogVolume(void)
 {
     UInt16 att;
@@ -842,23 +1097,18 @@ void AuVortex2Driver::applyAnalogVolume(void)
     if (!fBaseAddress)
         return;
 
-    // ТОТАЛЬНЫЙ АППАРАТНЫЙ MUTE (100% тишина на обоих гнездах)
+    /*
+     * Keep the codec/DAC and analog reference powered while muted. Powering the
+     * analog section down at volume zero and waking it on the first nonzero
+     * step can create a large transient. Use the AC'97 mute bits instead.
+     */
     if (fMuted || fMasterVolume <= 0) {
         codecWrite(AC97_MASTER, 0x801f);
         codecWrite(AC97_HEADPHONE, 0x801f);
         codecWrite(AC97_PCM, 0x801f);
         codecWrite(AC97_SURROUND_MASTER, 0x801f);
-        codecWrite(0x5e, 0x0000);                  // Отключаем 3D-блок
-        
-        // Переводим аналоговые выходы кодека в режим сна (выключаем Vref и микшер)
-        codecWrite(AC97_POWERDOWN, 0x0f00); 
         return;
     }
-
-    // Если звук включен — возвращаем полное питание аналоговой части кодека
-    codecWrite(AC97_POWERDOWN, 0x0000); 
-    // Исправлено: добавлены пропущенные скобки в вызовах
-    codecWrite(0x5e, 0x0000); IOSleep(1); codecWrite(0x5e, 0xabba); // Сброс 3D-блока
 
     att = (UInt16)(0x1f - ((fMasterVolume * 0x1f) / kAuV2VolumeMax));
     if (att > 0x1f)
@@ -866,6 +1116,7 @@ void AuVortex2Driver::applyAnalogVolume(void)
 
     reg = (UInt16)((att << 8) | att);
 
+    /* Volume changes must not reset the vendor DAC or 3D processing block. */
     codecWrite(AC97_MASTER, reg);
     codecWrite(AC97_HEADPHONE, reg);
     codecWrite(AC97_PCM, 0x0000);
@@ -1142,6 +1393,7 @@ bool AuVortex2Driver::initializeVortexHardware(void)
     connectAnalogPlayback(1);
     connectAnalogCapture(1);
     connectSpdifPlayback(1);
+    setPlaybackRoute(kAuV2PlaybackRouteNone);
     srcSet48kPlayback();
     srcSet48kCapture();
     spdifInit(48000);
@@ -1158,10 +1410,16 @@ bool AuVortex2Driver::initializeVortexHardware(void)
 
 void AuVortex2Driver::shutdownHardware(void)
 {
-    if (!fBaseAddress)
+    if (!fBaseAddress) {
+        if (fBusMasterEnabled && !setBusMasterEnabled(false))
+            LOG("warning: unable to disable PCI bus mastering without MMIO");
         return;
+    }
     stopPlaybackDMA();
     stopCaptureDMA();
+    setPlaybackRoute(kAuV2PlaybackRouteNone);
+    if (!setBusMasterEnabled(false))
+        LOG("warning: PCI bus mastering remains enabled during shutdown");
     writeRegister(VORTEX_CTRL, readRegister(VORTEX_CTRL) & ~CTRL_IRQ_ENABLE);
     fifoInit();
     adbInit();
@@ -1169,6 +1427,7 @@ void AuVortex2Driver::shutdownHardware(void)
     writeRegister(VORTEX_CTRL, 0);
     IOSleep(5);
     writeRegister(VORTEX_IRQ_SOURCE, 0xffff);
+    fHardwareTouched = false;
 }
 
 bool AuVortex2Driver::setupTimer(void)
@@ -1189,12 +1448,21 @@ bool AuVortex2Driver::setupTimer(void)
 
 void AuVortex2Driver::startStampTimer(void)
 {
-    if (fTimerSource)
+    if (fTimerSource && fPlaybackLock) {
+        IOLockLock(fPlaybackLock);
+        fTimerRunning = true;
         fTimerSource->setTimeoutMS(5);
+        IOLockUnlock(fPlaybackLock);
+    }
 }
 
 void AuVortex2Driver::stopStampTimer(void)
 {
+    if (fPlaybackLock)
+        IOLockLock(fPlaybackLock);
+    fTimerRunning = false;
+    if (fPlaybackLock)
+        IOLockUnlock(fPlaybackLock);
     if (fTimerSource)
         fTimerSource->cancelTimeout();
 }
@@ -1202,31 +1470,52 @@ void AuVortex2Driver::stopStampTimer(void)
 void AuVortex2Driver::timerFired(OSObject *owner, IOTimerEventSource *sender)
 {
     AuVortex2Driver *driver = OSDynamicCast(AuVortex2Driver, owner);
+    AuVortex2AudioEngine *engine = NULL;
     (void)sender;
-    if (driver && driver->fAudioEngine)
-        driver->fAudioEngine->pollTimeStamp();
-    if (driver && driver->fTimerSource)
-        driver->fTimerSource->setTimeoutMS(5);
+    if (driver && driver->fPlaybackLock) {
+        IOLockLock(driver->fPlaybackLock);
+        engine = driver->fActiveAudioEngine;
+        if (engine)
+            engine->retain();
+        if (driver->fTimerRunning && driver->fTimerSource)
+            driver->fTimerSource->setTimeoutMS(5);
+        IOLockUnlock(driver->fPlaybackLock);
+    }
+    if (engine) {
+        engine->pollTimeStamp();
+        engine->release();
+    }
 }
 
 void AuVortex2Driver::handleInterrupt(void)
 {
 }
 
-bool AuVortex2AudioEngine::init(AuVortex2Driver *device)
+bool AuVortex2AudioEngine::initForDevice(AuVortex2Driver *device,
+                                         bool digitalOutput)
 {
     if (!device)
         return false;
     if (!IOAudioEngine::init(NULL))
         return false;
     fDevice = device;
+    fDigitalOutput = digitalOutput;
+    fEngineRunning = false;
+    fDigitalVolume = kAuV2VolumeDefault;
+    fDigitalMuted = false;
     fOutputBuffer = NULL;
+    fOutputPrepared = false;
     fOutputBufferPtr = NULL;
     fOutputStream = NULL;
     fInputBuffer = NULL;
+    fInputPrepared = false;
     fInputBufferPtr = NULL;
     fInputStream = NULL;
     fLastSampleFrame = 0;
+    fLastPollUptime = 0;
+    fInputDiagnosticFrames = 0;
+    fInputDiagnosticPeak = 0;
+    fCaptureDiagnosticLastUptime = 0;
     bzero(fOutputPhys, sizeof(fOutputPhys));
     bzero(fInputPhys, sizeof(fInputPhys));
     return true;
@@ -1235,11 +1524,23 @@ bool AuVortex2AudioEngine::init(AuVortex2Driver *device)
 void AuVortex2AudioEngine::free(void)
 {
     if (fOutputBuffer) {
+        if (fOutputPrepared) {
+            IOReturn result = fOutputBuffer->complete(kIODirectionInOut);
+            if (result != kIOReturnSuccess)
+                LOG("output DMA buffer complete failed: 0x%x", result);
+            fOutputPrepared = false;
+        }
         fOutputBuffer->release();
         fOutputBuffer = NULL;
         fOutputBufferPtr = NULL;
     }
     if (fInputBuffer) {
+        if (fInputPrepared) {
+            IOReturn result = fInputBuffer->complete(kIODirectionInOut);
+            if (result != kIOReturnSuccess)
+                LOG("input DMA buffer complete failed: 0x%x", result);
+            fInputPrepared = false;
+        }
         fInputBuffer->release();
         fInputBuffer = NULL;
         fInputBufferPtr = NULL;
@@ -1254,7 +1555,9 @@ bool AuVortex2AudioEngine::initHardware(IOService *provider)
     IOAudioSampleRate sampleRate;
     if (!IOAudioEngine::initHardware(provider))
         return false;
-    setDescription("Aureal Vortex 2 Output");
+    setDescription(fDigitalOutput ?
+        "Aureal Vortex 2 Digital Output (S/PDIF)" :
+        "Aureal Vortex 2 Analog Output");
     setNumSampleFramesPerBuffer(kAuV2BufferFrames);
     setSampleOffset(kAuV2PeriodFrames);
     setSampleLatency(kAuV2PeriodFrames);
@@ -1272,70 +1575,42 @@ bool AuVortex2AudioEngine::initHardware(IOService *provider)
         LOG("output buffer prepare failed");
         return false;
     }
+    fOutputPrepared = true;
     fOutputBufferPtr = fOutputBuffer->getBytesNoCopy();
     if (!fOutputBufferPtr) {
         LOG("output buffer ptr failed");
         return false;
     }
     bzero(fOutputBufferPtr, kAuV2BufferBytes);
-    {
-        IOByteCount len = 0;
-        IOPhysicalAddress base;
-        UInt32 i;
-        base = fOutputBuffer->getPhysicalSegment(0, &len);
-        if (base == 0) {
-            LOG("DMA physical address failed");
+    if (!collectDmaPages(fOutputBuffer, "output", fOutputPhys))
+        return false;
+    if (!fDigitalOutput) {
+        fInputBuffer = IOBufferMemoryDescriptor::withOptions(
+            kIOMemoryPhysicallyContiguous,
+            kAuV2BufferBytes, PAGE_SIZE);
+        if (!fInputBuffer) {
+            LOG("input buffer alloc failed");
             return false;
         }
-        if (len < kAuV2BufferBytes)
-            LOG("warning: DMA buffer not fully contiguous (%lu of %u)", (unsigned long)len, kAuV2BufferBytes);
-        for (i = 0; i < kAuV2NumPeriods; i++) {
-            IOByteCount seglen = 0;
-            fOutputPhys[i] = fOutputBuffer->getPhysicalSegment(i * kAuV2PeriodBytes, &seglen);
-            if (fOutputPhys[i] == 0)
-                fOutputPhys[i] = base + (i * kAuV2PeriodBytes);
-            LOG("DMA page %u phys=0x%08x seg=%lu", i, (unsigned)fOutputPhys[i], (unsigned long)seglen);
-        }
-    }
-    fInputBuffer = IOBufferMemoryDescriptor::withOptions(
-        kIOMemoryPhysicallyContiguous,
-        kAuV2BufferBytes, PAGE_SIZE);
-    if (!fInputBuffer) {
-        LOG("input buffer alloc failed");
-        return false;
-    }
-    if (fInputBuffer->prepare(kIODirectionInOut) != kIOReturnSuccess) {
-        LOG("input buffer prepare failed");
-        return false;
-    }
-    fInputBufferPtr = fInputBuffer->getBytesNoCopy();
-    if (!fInputBufferPtr) {
-        LOG("input buffer ptr failed");
-        return false;
-    }
-    bzero(fInputBufferPtr, kAuV2BufferBytes);
-    {
-        IOByteCount len = 0;
-        IOPhysicalAddress base;
-        UInt32 i;
-        base = fInputBuffer->getPhysicalSegment(0, &len);
-        if (base == 0) {
-            LOG("input DMA physical address failed");
+        if (fInputBuffer->prepare(kIODirectionInOut) != kIOReturnSuccess) {
+            LOG("input buffer prepare failed");
             return false;
         }
-        for (i = 0; i < kAuV2NumPeriods; i++) {
-            IOByteCount seglen = 0;
-            fInputPhys[i] = fInputBuffer->getPhysicalSegment(i * kAuV2PeriodBytes, &seglen);
-            if (fInputPhys[i] == 0)
-                fInputPhys[i] = base + (i * kAuV2PeriodBytes);
-            LOG("input DMA page %u phys=0x%08x seg=%lu", i, (unsigned)fInputPhys[i], (unsigned long)seglen);
+        fInputPrepared = true;
+        fInputBufferPtr = fInputBuffer->getBytesNoCopy();
+        if (!fInputBufferPtr) {
+            LOG("input buffer ptr failed");
+            return false;
         }
+        bzero(fInputBufferPtr, kAuV2BufferBytes);
+        if (!collectDmaPages(fInputBuffer, "input", fInputPhys))
+            return false;
     }
     if (!createOutputStream()) {
         LOG("createOutputStream failed");
         return false;
     }
-    if (!createInputStream()) {
+    if (!fDigitalOutput && !createInputStream()) {
         LOG("createInputStream failed");
         return false;
     }
@@ -1361,7 +1636,9 @@ bool AuVortex2AudioEngine::createOutputStream(void)
         LOG("stream alloc failed");
         return false;
     }
-    if (!fOutputStream->initWithAudioEngine(this, kIOAudioStreamDirectionOutput, kAuV2Channels)) {
+    if (!fOutputStream->initWithAudioEngine(this,
+            kIOAudioStreamDirectionOutput, kAuV2Channels,
+            fDigitalOutput ? "AU8830 S/PDIF PCM" : "AU8830 Analog PCM")) {
         LOG("stream init failed");
         return false;
     }
@@ -1406,7 +1683,10 @@ bool AuVortex2AudioEngine::createInputStream(void)
     format.fBitWidth = 16;
     format.fAlignment = kIOAudioStreamAlignmentLowByte;
     format.fByteOrder = kIOAudioStreamByteOrderLittleEndian;
-    format.fIsMixable = false;
+    // convertInputSamples writes Float32 samples into IOAudioFamily's client
+    // buffer. Mark the capture stream mixable so the 10.6 family sizes that
+    // buffer using sizeof(float), rather than the 16-bit hardware sample width.
+    format.fIsMixable = true;
     format.fDriverTag = 0;
     sampleRate.whole = kAuV2SampleRate;
     sampleRate.fraction = 0;
@@ -1423,11 +1703,46 @@ bool AuVortex2AudioEngine::createAudioControls(void)
     IOAudioLevelControl *volume;
     IOAudioToggleControl *mute;
 
+    if (fDigitalOutput) {
+        volume = IOAudioLevelControl::createVolumeControl(
+            fDigitalVolume,
+            kAuV2VolumeMin,
+            kAuV2VolumeMax,
+            -(46 << 16) + 32768,
+            0,
+            kIOAudioControlChannelIDAll,
+            kIOAudioControlChannelNameAll,
+            0,
+            kIOAudioControlUsageOutput);
+        if (!volume) {
+            LOG("S/PDIF volume control alloc failed");
+            return false;
+        }
+        volume->setValueChangeHandler(digitalVolumeChangeHandler, this);
+        addDefaultAudioControl(volume);
+        volume->release();
+
+        mute = IOAudioToggleControl::createMuteControl(
+            false,
+            kIOAudioControlChannelIDAll,
+            kIOAudioControlChannelNameAll,
+            0,
+            kIOAudioControlUsageOutput);
+        if (!mute) {
+            LOG("S/PDIF mute control alloc failed");
+            return false;
+        }
+        mute->setValueChangeHandler(digitalMuteChangeHandler, this);
+        addDefaultAudioControl(mute);
+        mute->release();
+        return true;
+    }
+
     volume = IOAudioLevelControl::createVolumeControl(
         fDevice->fMasterVolume,
         kAuV2VolumeMin,
         kAuV2VolumeMax,
-        (-46 << 16) + 32768,
+        -(46 << 16) + 32768,
         0,
         kIOAudioControlChannelIDAll,
         kIOAudioControlChannelNameAll,
@@ -1455,11 +1770,31 @@ bool AuVortex2AudioEngine::createAudioControls(void)
     addDefaultAudioControl(mute);
     mute->release();
 
+    if (fDevice->fThreeDControlAvailable) {
+        IOAudioToggleControl *threeD = IOAudioToggleControl::create(
+            fDevice->fThreeDEnabled,
+            kIOAudioControlChannelIDAll,
+            kIOAudioControlChannelNameAll,
+            kAuV2ThreeDControlID,
+            0,
+            kIOAudioControlUsageOutput);
+        if (threeD) {
+            threeD->setValueChangeHandler(
+                AuVortex2Driver::threeDChangeHandler, fDevice);
+            const IOReturn result = addDefaultAudioControl(threeD);
+            threeD->release();
+            if (result != kIOReturnSuccess)
+                LOG("3D toggle registration failed: 0x%08x", result);
+        } else {
+            LOG("3D toggle allocation failed");
+        }
+    }
+
     volume = IOAudioLevelControl::createVolumeControl(
         fDevice->fInputVolume,
         kAuV2VolumeMin,
         kAuV2VolumeMax,
-        (-22 << 16) + 32768,
+        -(22 << 16) + 32768,
         (22 << 16) + 32768,
         kIOAudioControlChannelIDAll,
         kIOAudioControlChannelNameAll,
@@ -1489,24 +1824,172 @@ bool AuVortex2AudioEngine::createAudioControls(void)
     return true;
 }
 
+IOReturn AuVortex2AudioEngine::digitalVolumeChangeHandler(
+    OSObject *target, IOAudioControl *control, SInt32 oldValue, SInt32 newValue)
+{
+    AuVortex2AudioEngine *engine = OSDynamicCast(AuVortex2AudioEngine, target);
+    if (!engine || !engine->fDigitalOutput)
+        return kIOReturnBadArgument;
+    (void)control;
+    (void)oldValue;
+    if (newValue < kAuV2VolumeMin)
+        newValue = kAuV2VolumeMin;
+    if (newValue > kAuV2VolumeMax)
+        newValue = kAuV2VolumeMax;
+    engine->fDigitalVolume = newValue;
+    return kIOReturnSuccess;
+}
+
+IOReturn AuVortex2AudioEngine::digitalMuteChangeHandler(
+    OSObject *target, IOAudioControl *control, SInt32 oldValue, SInt32 newValue)
+{
+    AuVortex2AudioEngine *engine = OSDynamicCast(AuVortex2AudioEngine, target);
+    if (!engine || !engine->fDigitalOutput)
+        return kIOReturnBadArgument;
+    (void)control;
+    (void)oldValue;
+    engine->fDigitalMuted = (newValue != 0);
+    return kIOReturnSuccess;
+}
+
 IOReturn AuVortex2AudioEngine::performAudioEngineStart(void)
 {
-    fLastSampleFrame = 0;
-    takeTimeStamp(false);
+    AuVortex2AudioEngine *other;
+    IOReturn result;
+
+    if (!fDevice || !fDevice->fPlaybackLock || !fOutputBufferPtr)
+        return kIOReturnNotReady;
+
+    IOLockLock(fDevice->fPlaybackLock);
+    if (fDevice->fPlaybackTransition) {
+        IOLockUnlock(fDevice->fPlaybackLock);
+        return kIOReturnBusy;
+    }
+    if (fDevice->fActiveAudioEngine == this && fEngineRunning) {
+        IOLockUnlock(fDevice->fPlaybackLock);
+        return kIOReturnSuccess;
+    }
+    other = fDevice->fActiveAudioEngine;
+    if (other && other != this)
+        fDevice->fPlaybackTransition = true;
+    IOLockUnlock(fDevice->fPlaybackLock);
+
+    if (other && other != this) {
+        result = other->stopAudioEngine();
+        if (result != kIOReturnSuccess) {
+            IOLockLock(fDevice->fPlaybackLock);
+            fDevice->fPlaybackTransition = false;
+            IOLockUnlock(fDevice->fPlaybackLock);
+            LOG("cannot stop previous %s output: 0x%x",
+                other->fDigitalOutput ? "S/PDIF" : "analog", result);
+            return result;
+        }
+        LOG("stopped previous %s output before %s start",
+            other->fDigitalOutput ? "S/PDIF" : "analog",
+            fDigitalOutput ? "S/PDIF" : "analog");
+    }
+
+    IOLockLock(fDevice->fPlaybackLock);
+    if (fDevice->fActiveAudioEngine && fDevice->fActiveAudioEngine != this) {
+        fDevice->fPlaybackTransition = false;
+        IOLockUnlock(fDevice->fPlaybackLock);
+        LOG("output start refused: another engine still owns DMA0");
+        return kIOReturnBusy;
+    }
+    fDevice->fActiveAudioEngine = this;
+    fEngineRunning = true;
+    fDevice->fPlaybackTransition = true;
+    IOLockUnlock(fDevice->fPlaybackLock);
+
+    LOG("engine start: programming shared playback DMA0 (%s)",
+        fDigitalOutput ? "S/PDIF" : "analog");
     fDevice->programPlaybackDMA(fOutputPhys);
-    fDevice->programCaptureDMA(fInputPhys);
+    if (!fDigitalOutput) {
+        fDevice->programCaptureDMA(fInputPhys);
+        LOG("capture DMA configured, stat=0x%08x",
+            (unsigned)fDevice->readRegister(
+                VORTEX_ADBDMA_STAT + (kAuV2CapDMAChannel << 2)));
+    }
+    if (!fDevice->setBusMasterEnabled(true)) {
+        LOG("engine start failed: enabling PCI bus mastering");
+        fDevice->setPlaybackRoute(kAuV2PlaybackRouteNone);
+        IOLockLock(fDevice->fPlaybackLock);
+        if (fDevice->fActiveAudioEngine == this)
+            fDevice->fActiveAudioEngine = NULL;
+        fEngineRunning = false;
+        fDevice->fPlaybackTransition = false;
+        IOLockUnlock(fDevice->fPlaybackLock);
+        return kIOReturnError;
+    }
     fDevice->startPlaybackDMA();
-    fDevice->startCaptureDMA();
+    if (!fDigitalOutput) {
+        fDevice->startCaptureDMA();
+        LOG("capture FIFO started, stat=0x%08x",
+            (unsigned)fDevice->readRegister(
+                VORTEX_ADBDMA_STAT + (kAuV2CapDMAChannel << 2)));
+        fInputDiagnosticFrames = 0;
+        fInputDiagnosticPeak = 0;
+        fCaptureDiagnosticLastUptime = 0;
+    }
+    fDevice->setPlaybackRoute(fDigitalOutput ?
+        kAuV2PlaybackRouteSpdif : kAuV2PlaybackRouteAnalog);
+    LOG("audio engine started; output=%s capture=%s",
+        fDigitalOutput ? "S/PDIF" : "analog",
+        fDigitalOutput ? "disabled" : "enabled");
+    fLastSampleFrame = getCurrentSampleFrame();
+    clock_get_uptime(&fLastPollUptime);
+    {
+        const UInt64 kNanosecondsPerSecond = 1000000000ULL;
+        UInt64 ageNs =
+            ((UInt64)fLastSampleFrame * kNanosecondsPerSecond) /
+            kAuV2SampleRate;
+        UInt64 ageTicks;
+        UInt64 startTicks;
+        AbsoluteTime startTime;
+        nanoseconds_to_absolutetime(ageNs, &ageTicks);
+        startTicks = (ageTicks < fLastPollUptime) ?
+            (fLastPollUptime - ageTicks) : fLastPollUptime;
+        absoluteTimeFromTicks(startTicks, &startTime);
+        takeTimeStamp(false, &startTime);
+    }
     fDevice->startStampTimer();
+    IOLockLock(fDevice->fPlaybackLock);
+    fDevice->fPlaybackTransition = false;
+    IOLockUnlock(fDevice->fPlaybackLock);
     return kIOReturnSuccess;
 }
 
 IOReturn AuVortex2AudioEngine::performAudioEngineStop(void)
 {
+    IOReturn result = kIOReturnSuccess;
+    if (!fDevice || !fDevice->fPlaybackLock)
+        return kIOReturnSuccess;
+
+    IOLockLock(fDevice->fPlaybackLock);
+    if (fDevice->fActiveAudioEngine != this || !fEngineRunning) {
+        fEngineRunning = false;
+        IOLockUnlock(fDevice->fPlaybackLock);
+        return kIOReturnSuccess;
+    }
+    fEngineRunning = false;
+    IOLockUnlock(fDevice->fPlaybackLock);
+
     fDevice->stopStampTimer();
     fDevice->stopPlaybackDMA();
-    fDevice->stopCaptureDMA();
-    return kIOReturnSuccess;
+    if (!fDigitalOutput)
+        fDevice->stopCaptureDMA();
+    fDevice->setPlaybackRoute(kAuV2PlaybackRouteNone);
+    if (!fDevice->setBusMasterEnabled(false))
+        result = kIOReturnError;
+
+    IOLockLock(fDevice->fPlaybackLock);
+    fDevice->fActiveAudioEngine = NULL;
+    IOLockUnlock(fDevice->fPlaybackLock);
+
+    LOG("audio engine stopped; output=%s capture=%s",
+        fDigitalOutput ? "S/PDIF" : "analog",
+        fDigitalOutput ? "not used" : "DMA disabled");
+    return result;
 }
 
 UInt32 AuVortex2AudioEngine::getCurrentSampleFrame(void)
@@ -1517,6 +2000,9 @@ UInt32 AuVortex2AudioEngine::getCurrentSampleFrame(void)
 IOReturn AuVortex2AudioEngine::performFormatChange(IOAudioStream *audioStream,
     const IOAudioStreamFormat *newFormat, const IOAudioSampleRate *newSampleRate)
 {
+    (void)audioStream;
+    (void)newFormat;
+    (void)newSampleRate;
     return kIOReturnSuccess;
 }
 
@@ -1527,9 +2013,15 @@ IOReturn AuVortex2AudioEngine::clipOutputSamples(const void *mixBuf, void *sampl
     UInt32 numSamples = numSampleFrames * streamFormat->fNumChannels;
     float *in = ((float *)mixBuf) + (firstSampleFrame * streamFormat->fNumChannels);
     SInt16 *out = ((SInt16 *)sampleBuf) + (firstSampleFrame * streamFormat->fNumChannels);
+    float digitalGain = 1.0f;
     UInt32 i;
+    (void)audioStream;
+    if (fDigitalOutput) {
+        digitalGain = fDigitalMuted ? 0.0f :
+            ((float)fDigitalVolume / (float)kAuV2VolumeMax);
+    }
     for (i = 0; i < numSamples; i++) {
-        float s = in[i];
+        float s = in[i] * digitalGain;
         if (s > 1.0f) s = 1.0f;
         if (s < -1.0f) s = -1.0f;
         out[i] = (SInt16)(s * 32767.0f);
@@ -1541,24 +2033,163 @@ IOReturn AuVortex2AudioEngine::convertInputSamples(const void *sampleBuf, void *
     UInt32 firstSampleFrame, UInt32 numSampleFrames,
     const IOAudioStreamFormat *streamFormat, IOAudioStream *audioStream)
 {
-    UInt32 numSamples = numSampleFrames * streamFormat->fNumChannels;
-    const SInt16 *in = ((const SInt16 *)sampleBuf) + (firstSampleFrame * streamFormat->fNumChannels);
-    float *out = ((float *)destBuf) + (firstSampleFrame * streamFormat->fNumChannels);
-    UInt32 i;
+    const SInt16 *in;
+    float *out;
+    UInt32 frame;
+    UInt32 channel;
+    UInt32 sourceFrame;
+    UInt32 capturePeak = 0;
     (void)audioStream;
-    for (i = 0; i < numSamples; i++)
-        out[i] = ((float)in[i]) / 32768.0f;
+
+    if (!sampleBuf || !destBuf || !streamFormat ||
+        streamFormat->fNumChannels != kAuV2Channels) {
+        LOG("capture guard: invalid conversion arguments");
+        return kIOReturnBadArgument;
+    }
+
+    if (firstSampleFrame >= kAuV2BufferFrames ||
+        numSampleFrames > kAuV2BufferFrames) {
+        LOG("capture guard: source range outside DMA ring first=%u frames=%u",
+            (unsigned)firstSampleFrame, (unsigned)numSampleFrames);
+        return kIOReturnBadArgument;
+    }
+
+    in = (const SInt16 *)sampleBuf;
+    /*
+     * Follow the known-good YMF754 input callback in this workspace: use
+     * firstSampleFrame to address the hardware ring, but write this callback's
+     * converted frames starting at destBuf[0]. The previous AU code also added
+     * firstSampleFrame to destBuf; the observed panic address and guard log are
+     * consistent with that double offset exceeding the client destination.
+     */
+    out = (float *)destBuf;
+    sourceFrame = firstSampleFrame;
+    for (frame = 0; frame < numSampleFrames; frame++) {
+        for (channel = 0; channel < kAuV2Channels; channel++) {
+            SInt32 sample =
+                (SInt32)in[sourceFrame * kAuV2Channels + channel];
+            UInt32 magnitude =
+                (sample < 0) ? (UInt32)(-sample) : (UInt32)sample;
+            if (magnitude > capturePeak)
+                capturePeak = magnitude;
+            out[frame * kAuV2Channels + channel] =
+                ((float)sample) / 32768.0f;
+        }
+        if (++sourceFrame == kAuV2BufferFrames)
+            sourceFrame = 0;
+    }
+
+    if (capturePeak > fInputDiagnosticPeak)
+        fInputDiagnosticPeak = capturePeak;
+    fInputDiagnosticFrames += numSampleFrames;
+    if (fInputDiagnosticFrames >= kAuV2SampleRate) {
+        UInt32 dmaStatus = fDevice->readRegister(
+            VORTEX_ADBDMA_STAT + (kAuV2CapDMAChannel << 2));
+        UInt32 dmaPage = (dmaStatus & ADB_SUBBUF_MASK) >> ADB_SUBBUF_SHIFT;
+        UInt32 dmaBytePosition =
+            dmaPage * kAuV2PeriodBytes + (dmaStatus & (kAuV2PeriodBytes - 1));
+        if (dmaBytePosition >= kAuV2BufferBytes)
+            dmaBytePosition %= kAuV2BufferBytes;
+
+        LOG("capture diagnostic: DMA byte=%u peak=%u",
+            (unsigned)dmaBytePosition, (unsigned)fInputDiagnosticPeak);
+        fInputDiagnosticFrames -= kAuV2SampleRate;
+        fInputDiagnosticPeak = 0;
+    }
     return kIOReturnSuccess;
 }
 
 void AuVortex2AudioEngine::pollTimeStamp(void)
 {
+    const UInt64 kNanosecondsPerSecond = 1000000000ULL;
+    const UInt64 ringFrames = kAuV2BufferFrames;
     UInt32 frame = getCurrentSampleFrame();
+    UInt64 now;
+    UInt64 elapsedNs;
+    UInt64 expectedFrames;
+    SInt64 cursorDelta;
+    UInt64 estimatedFramesSinceWrap;
+    UInt64 wraps = 0;
 
-    /* takeTimeStamp() means one full sample buffer wrapped, not one timer tick.
-       A 10 ms tick on a 2048-frame / 48 kHz buffer (~42.7 ms) made CoreAudio
-       run about 4x fast (video racing, clipIfNecessary). */
-    if (frame < fLastSampleFrame)
-        takeTimeStamp(true);
+    clock_get_uptime(&now);
+
+    /*
+     * Capture diagnostics apply only to the analog engine; the independent
+     * S/PDIF engine deliberately does not start the microphone DMA channel.
+     */
+    if (!fDigitalOutput && fCaptureDiagnosticLastUptime == 0) {
+        fCaptureDiagnosticLastUptime = now;
+    } else if (!fDigitalOutput && now > fCaptureDiagnosticLastUptime) {
+        UInt64 diagnosticElapsedNs;
+        absolutetime_to_nanoseconds(now - fCaptureDiagnosticLastUptime,
+                                    &diagnosticElapsedNs);
+        if (diagnosticElapsedNs >= kNanosecondsPerSecond) {
+            UInt32 captureStatus = fDevice->readRegister(
+                VORTEX_ADBDMA_STAT + (kAuV2CapDMAChannel << 2));
+            UInt32 capturePage =
+                (captureStatus & ADB_SUBBUF_MASK) >> ADB_SUBBUF_SHIFT;
+            UInt32 captureBytePosition =
+                capturePage * kAuV2PeriodBytes +
+                (captureStatus & (kAuV2PeriodBytes - 1));
+            if (captureBytePosition >= kAuV2BufferBytes)
+                captureBytePosition %= kAuV2BufferBytes;
+            LOG("capture DMA poll: status=0x%08x byte=%u",
+                (unsigned)captureStatus, (unsigned)captureBytePosition);
+            fCaptureDiagnosticLastUptime = now;
+        }
+    }
+
+    if (now <= fLastPollUptime || frame >= ringFrames ||
+        fLastSampleFrame >= ringFrames) {
+        fLastSampleFrame = frame;
+        fLastPollUptime = now;
+        return;
+    }
+
+    /*
+     * The hardware position is modulo the four-page DMA ring. A timer callback
+     * can be delayed long enough to miss one or more complete laps, so a simple
+     * frame < previousFrame test can leave IOAudio's loop count behind the DMA.
+     * Estimate elapsed sample frames from monotonic uptime, then choose the
+     * nearest whole-ring count consistent with the observed cursor movement.
+     */
+    absolutetime_to_nanoseconds(now - fLastPollUptime, &elapsedNs);
+    expectedFrames =
+        (elapsedNs / kNanosecondsPerSecond) * kAuV2SampleRate +
+        (((elapsedNs % kNanosecondsPerSecond) * kAuV2SampleRate +
+          (kNanosecondsPerSecond / 2)) / kNanosecondsPerSecond);
+    cursorDelta = (SInt64)frame - (SInt64)fLastSampleFrame;
+    if ((SInt64)expectedFrames > cursorDelta) {
+        estimatedFramesSinceWrap = (UInt64)((SInt64)expectedFrames - cursorDelta);
+        wraps = (estimatedFramesSinceWrap + (ringFrames / 2)) / ringFrames;
+    }
+
+    if (wraps != 0) {
+        UInt64 ageNs =
+            ((UInt64)frame * kNanosecondsPerSecond) / kAuV2SampleRate;
+        UInt64 ageTicks;
+        UInt64 wrapTicks;
+        AbsoluteTime wrapTime;
+        UInt64 i;
+
+        nanoseconds_to_absolutetime(ageNs, &ageTicks);
+        wrapTicks = (ageTicks < now) ? (now - ageTicks) : now;
+        absoluteTimeFromTicks(wrapTicks, &wrapTime);
+
+        /*
+         * takeTimeStamp() records the most recent buffer-boundary time. If
+         * polling missed multiple rings, advance the loop counter for each lap
+         * but use the estimated time of the latest boundary.
+         */
+        for (i = 0; i < wraps; i++)
+            takeTimeStamp(true, &wrapTime);
+
+        if (wraps > 1) {
+            LOG("timestamp poll recovered %llu DMA ring wraps (frame=%u)",
+                (unsigned long long)wraps, (unsigned)frame);
+        }
+    }
+
     fLastSampleFrame = frame;
+    fLastPollUptime = now;
 }
